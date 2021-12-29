@@ -1,79 +1,99 @@
-from sys import stdin, exit
+from sys import stdin
 from itertools import product
-from collections import Counter
+from functools import cache, reduce
+from collections import namedtuple
+
+Player = namedtuple('Player', ['position', 'score'])
+Rules = namedtuple('Rules', ['die', 'winning_score', 'board_size', 'rolls_per_turn'], defaults=[10, 3])
+GameState = namedtuple('GameState', ['players', 'turn', 'winner'], defaults=[0,None])
+Game = namedtuple('Game', ['rules', 'state'])
 
 lines = [line.strip() for line in stdin.readlines()]
-player_positions = [int(line.split(': ')[1]) for line in lines]
+players = tuple(Player(position=int(line.split(': ')[1]),score=0) for line in lines)
 
-def create_die(sides):
-    counter = [0] # Boxed Int
+def roll(die, rolls):
+    for combination in product(*(next(die) for _ in range(rolls))):
+        yield sum(combination)
 
-    def roll():
-        while True:
-            for i in range(1, sides + 1):
-                counter[0] = counter[0] + 1
-                yield i
+def move(player, spaces, board_size):
+    position = ((player.position + spaces - 1) % board_size) + 1
+    score = player.score + position
+    return Player(position, score)
 
-    return counter, roll()
+def find_winner(game):
+    for player in game.state.players:
+        if player.score >= game.rules.winning_score:
+            return player
 
-def take_turn(player_position, die, board_size, rolls):
-    move_amount = sum(next(die) for _ in range(rolls))
-    new_position = ((player_position + move_amount - 1) % board_size) + 1
-    return new_position
+# A helper for setting an item in a tuple (which are immutable)
+# We use tuples all over because they are hashable, and we need that to be able to use them as arguments in functions that use @cache
+def set_item(i, tup, new_value):
+    xs = list(tup)
+    xs[i] = new_value
+    return tuple(xs)
 
-def play(player_positions, winning_score, board_size=10, rolls=3):
-    count, die = create_die(100)
-    player_positions = player_positions[:]
-    scores = [0 for _ in player_positions]
+def next_turns(game):
+    player_index = game.state.turn % len(game.state.players)
+    player = game.state.players[player_index]
+
+    for spaces in roll(game.rules.die, game.rules.rolls_per_turn):
+        moved_player = move(player, spaces, game.rules.board_size)
+        players = set_item(player_index, game.state.players, moved_player)
+        state = game.state._replace(players=players, turn=game.state.turn + 1)
+        yield Game(rules=game.rules, state=state)
+
+@cache
+def play(game, mapper, reducer):
+    winner = find_winner(game)
+    if winner is not None:
+        state = game.state._replace(winner=winner)
+        game = game._replace(state=state)
+        return mapper(game)
+
+    results = [play(next_turn, mapper, reducer) for next_turn in next_turns(game)]
+    return reduce(reducer, results)
+
+# ####################
+# Deterministic
+# ####################
+def deterministic_die(sides):
     while True:
-        for i, position in enumerate(player_positions):
-            player_positions[i] = take_turn(position, die, board_size, rolls)
-            scores[i] += player_positions[i]
-            if scores[i] >= winning_score:
-                return scores, count[0]
+        for i in range(1, sides + 1):
+            yield [i]
 
-print(player_positions)
-scores, rolls = play(player_positions, 1000)
-print(min(scores) * rolls)
+def score(game):
+    turn = game.state.turn
+    rolls = game.rules.rolls_per_turn
+    min_score = min(player.score for player in game.state.players)
+    return min_score * turn * rolls
 
-def quantum_play(player_positions, winning_score, player_scores=None, player_turn=0, board_size=10, rolls=3, memoized_results={}):
-    if player_scores is None:
-        player_scores = [0 for _ in player_positions]
+def identity(_, score):
+    return score
 
-    hashable_player_positions = tuple(p for p in player_positions)
-    hashable_player_scores = tuple(s for s in player_scores)
-    memoize_key = (hashable_player_positions, hashable_player_scores, player_turn)
+die = deterministic_die(100)
+rules = Rules(die=deterministic_die(100), winning_score=1000)
+state = GameState(players=players)
+game = Game(rules=rules, state=state)
 
-    if memoize_key in memoized_results:
-        return memoized_results[memoize_key]
+print(play(game, score, identity))
 
-    results = [0 for _ in player_positions]
-    for player_index in range(len(player_positions)):
-        if player_scores[player_index] >= winning_score:
-            results[player_index] = 1
-            return results
+# ####################
+# Quantum
+# ####################
+def quantum_die(sides):
+    while True:
+        yield list(range(1, sides + 1))
 
-    all_roll_combinations = product(*[list(range(1,4)) for _ in range(rolls)])
-    all_movement_amounts = map(sum, all_roll_combinations)
-    movement_frequencies = Counter(all_movement_amounts)
+def wins(game):
+    winner = game.state.winner
+    players = game.state.players
+    return [1 if winner == player else 0 for player in players]
 
-    player_position = player_positions[player_turn]
-    for move_amount, frequency in movement_frequencies.items():
-        new_position = ((player_position + move_amount - 1) % board_size) + 1
+def vector_addition(a, b):
+    return [sum(pair) for pair in zip(a, b)]
 
-        new_player_positions = player_positions[:]
-        new_player_positions[player_turn] = new_position
+rules = Rules(die=quantum_die(3), winning_score=21)
+state = GameState(players=players)
+game = Game(rules=rules, state=state)
 
-        new_player_scores = player_scores[:]
-        new_player_scores[player_turn] += new_position
-
-        next_turn = (player_turn + 1) % len(player_positions)
-        wins = quantum_play(new_player_positions, winning_score, new_player_scores, next_turn, board_size, rolls, memoized_results)
-
-        results = [result + (count * frequency) for result, count in zip(results, wins)]
-
-    memoized_results[memoize_key] = results
-    return results
-
-win_counts = quantum_play(player_positions, 21)
-print(max(win_counts))
+print(max(play(game, wins, vector_addition)))
