@@ -1,6 +1,13 @@
 from sys import stdin
+from enum import IntEnum
 
 ROUNDS = [line.split() for line in stdin.read().splitlines()]
+
+# Possible outcomes of a round, with their values being points awarded for each
+class Outcome(IntEnum):
+    WIN = 6
+    DRAW = 3
+    LOSS = 0
 
 # Maps a winning choice to its losing counterpart
 WIN_TO_LOSS = {
@@ -33,11 +40,17 @@ DYNAMIC_MAP = {
     'Z': lambda their_choice: LOSS_TO_WIN[their_choice], # Force a win
 }
 
-def score_round(theirs, mine):
-    they_won = WIN_TO_LOSS[theirs] == mine
-    they_lost = WIN_TO_LOSS[mine] == theirs
+def round_outcome(theirs, mine):
+    if WIN_TO_LOSS[theirs] == mine:
+        return Outcome.LOSS
 
-    points = 0 if they_won else 6 if they_lost else 3
+    if WIN_TO_LOSS[mine] == theirs:
+        return Outcome.WIN
+
+    return Outcome.DRAW
+
+def score_round(theirs, mine):
+    points = round_outcome(theirs, mine)
     points_boost = SELECTION_POINT_BOOST[mine]
 
     return points + points_boost
