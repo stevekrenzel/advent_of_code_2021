@@ -84,7 +84,7 @@ class Chamber:
         # Assume that looking back 64 rows is sufficient for a distinct signature
         coords = [(x, y) for x in range(1, self.width + 1) for y in range(self.height - 64, self.height + 1)]
 
-        # Treat the cells as bits and convert to an integer
+        # Convert cells to a binary string
         return ''.join('1' if point in self.points else '0' for point in coords)
 
     def process_command(self: 'Chamber', command: Command, shape: Shape) -> tuple[Shape, bool]:
